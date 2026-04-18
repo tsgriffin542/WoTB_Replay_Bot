@@ -92,6 +92,8 @@ def parse_player(data):
     info = parse_player_info(f[2][0]) if 2 in f else {}
     return {"account_id": account_id, **info}
 
+UINT64_MAX = 18446744073709551615
+
 def parse_player_results_info(data):
     f = parse_message(data)
     return {
@@ -103,6 +105,7 @@ def parse_player_results_info(data):
         "penetrations": f.get(7, [0])[0],
         "damage_blocked": f.get(117, [0])[0],
         "damage_received": f.get(11, [0])[0],
+        "survived": 1 if f.get(105, [None])[0] == UINT64_MAX else 0,
     }
 
 def parse_player_results(data):
@@ -241,6 +244,7 @@ async def scrim(interaction: discord.Interaction, action: str):
             "penetrations": 0,
             "blocked": 0,
             "damage_received": 0,
+            "survived": 0,
         })
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
@@ -266,6 +270,7 @@ async def scrim(interaction: discord.Interaction, action: str):
             pen_pct = round(p["penetrations"] / shots * 100) if shots > 0 else 0
             hit_pct = round(p["hits"] / shots * 100) if shots > 0 else 0
             dmg_ratio = round(p["damage"] / p["damage_received"], 2) if p["damage_received"] > 0 else "inf"
+            survival_pct = round(p["survived"] / games * 100)
             score = calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills, dmg_ratio if dmg_ratio != "inf" else 10)
             clan = f"[{p['clan_tag']}] " if p.get("clan_tag") else ""
             results_list.append({
@@ -277,6 +282,7 @@ async def scrim(interaction: discord.Interaction, action: str):
                 "pen_pct": pen_pct,
                 "hit_pct": hit_pct,
                 "dmg_ratio": dmg_ratio,
+                "survival_pct": survival_pct,
                 "score": score,
             })
 
@@ -286,7 +292,7 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         for i, p in enumerate(results_list, 1):
             lines.append(f"{i}. {p['name']} ({p['games']} games) | Score: {p['score']}/100")
-            lines.append(f"   Avg DMG: {p['avg_dmg']} | Kills: {p['avg_kills']} | DMG Ratio: {p['dmg_ratio']} | Pen%: {p['pen_pct']}% | Hit%: {p['hit_pct']}%")
+            lines.append(f"   Avg DMG: {p['avg_dmg']} | Kills: {p['avg_kills']} | DMG Ratio: {p['dmg_ratio']} | Pen%: {p['pen_pct']}% | Hit%: {p['hit_pct']}% | Survival: {p['survival_pct']}%")
             lines.append("")
 
         chunks = send_in_chunks("\n".join(lines))
@@ -332,6 +338,7 @@ async def on_message(message):
                         entry["penetrations"] += r.get("penetrations", 0)
                         entry["blocked"] += r.get("damage_blocked", 0)
                         entry["damage_received"] += r.get("damage_received", 0)
+                        entry["survived"] += r.get("survived", 0)
 
                     game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
                     await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
