@@ -194,6 +194,9 @@ async def on_ready():
     print("Slash commands synced!")
     for guild in client.guilds:
         print(f"Connected to server: {guild.name} (ID: {guild.id})")
+    
+    print(f"\nTotal guilds visible: {len(client.guilds)}")
+    print(f"Unavailable guilds: {client.guilds}")
 
 @tree.command(name="player", description="Search for a WoT Blitz player by name")
 async def player(interaction: discord.Interaction, name: str):
