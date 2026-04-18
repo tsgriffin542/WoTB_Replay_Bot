@@ -1,4 +1,4 @@
-﻿# encoding: utf-8
+# encoding: utf-8
 import discord
 from discord import app_commands
 import wg_api
@@ -189,6 +189,8 @@ async def on_ready():
     await tree.sync()
     print(f"Logged in as {client.user}")
     print("Slash commands synced!")
+    for guild in client.guilds:
+        print(f"Connected to server: {guild.name} (ID: {guild.id})")
 
 @tree.command(name="player", description="Search for a WoT Blitz player by name")
 async def player(interaction: discord.Interaction, name: str):
@@ -284,7 +286,7 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         for i, p in enumerate(results_list, 1):
             lines.append(f"{i}. {p['name']} ({p['games']} games) | Score: {p['score']}/100")
-            lines.append(f"   Avg DMG: {p['avg_dmg']} | Kills: {p['avg_kills']} | Blocked: {p['avg_blocked']} | DMG Ratio: {p['dmg_ratio']} | Pen%: {p['pen_pct']}% | Hit%: {p['hit_pct']}%")
+            lines.append(f"   Avg DMG: {p['avg_dmg']} | Kills: {p['avg_kills']} | DMG Ratio: {p['dmg_ratio']} | Pen%: {p['pen_pct']}% | Hit%: {p['hit_pct']}%")
             lines.append("")
 
         chunks = send_in_chunks("\n".join(lines))
