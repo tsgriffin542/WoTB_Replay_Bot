@@ -307,6 +307,58 @@ async def scrim(interaction: discord.Interaction, action: str):
     else:
         await interaction.followup.send("Invalid action. Use /scrim start or /scrim end.")
 
+async def handle_replay(data, message):
+    meta, players, results, winner = parse_replay_bytes(data)
+    room_type_id = meta.get("arenaBonusType", -1)
+    room_type = ROOM_TYPES.get(room_type_id, "Unknown")
+
+    if scrim_active:
+        for pid, p in players.items():
+            r = results.get(pid, {})
+            if r.get("shots", 0) == 0:
+                continue
+            entry = scrim_data[pid]
+            entry["nickname"] = p.get("nickname", "")
+            entry["clan_tag"] = p.get("clan_tag")
+            entry["games"] += 1
+            entry["damage"] += r.get("damage_dealt", 0)
+            entry["kills"] += r.get("kills", 0)
+            entry["shots"] += r.get("shots", 0)
+            entry["hits"] += r.get("hits", 0)
+            entry["penetrations"] += r.get("penetrations", 0)
+            entry["blocked"] += r.get("damage_blocked", 0)
+            entry["damage_received"] += r.get("damage_received", 0)
+            entry["capture_points"] += r.get("capture_points", 0)
+
+        game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
+        await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
+
+    else:
+        lines = []
+        lines.append(f"Map: {meta['mapName'].title()} | Mode: {room_type} | Duration: {int(meta['battleDuration'])}s")
+        lines.append("")
+        team1 = [(pid, p) for pid, p in players.items() if p["team"] == 1]
+        team2 = [(pid, p) for pid, p in players.items() if p["team"] == 2]
+        lines.append(f"Team 1{' WINNER' if winner == 1 else ''}")
+        lines.append("```")
+        for pid, p in team1:
+            r = results.get(pid, {})
+            if r.get("shots", 0) == 0:
+                continue
+            lines.append(format_player_line(p, r))
+            lines.append("")
+        lines.append("```")
+        lines.append(f"Team 2{' WINNER' if winner == 2 else ''}")
+        lines.append("```")
+        for pid, p in team2:
+            r = results.get(pid, {})
+            if r.get("shots", 0) == 0:
+                continue
+            lines.append(format_player_line(p, r))
+            lines.append("")
+        lines.append("```")
+        await message.channel.send("\n".join(lines))
+
 @client.event
 async def on_message(message):
     global scrim_data
@@ -318,58 +370,27 @@ async def on_message(message):
         if attachment.filename.endswith(".wotbreplay"):
             data = await attachment.read()
             try:
-                meta, players, results, winner = parse_replay_bytes(data)
-                room_type_id = meta.get("arenaBonusType", -1)
-                room_type = ROOM_TYPES.get(room_type_id, "Unknown")
-
-                if scrim_active:
-                    for pid, p in players.items():
-                        r = results.get(pid, {})
-                        if r.get("shots", 0) == 0:
-                            continue
-                        entry = scrim_data[pid]
-                        entry["nickname"] = p.get("nickname", "")
-                        entry["clan_tag"] = p.get("clan_tag")
-                        entry["games"] += 1
-                        entry["damage"] += r.get("damage_dealt", 0)
-                        entry["kills"] += r.get("kills", 0)
-                        entry["shots"] += r.get("shots", 0)
-                        entry["hits"] += r.get("hits", 0)
-                        entry["penetrations"] += r.get("penetrations", 0)
-                        entry["blocked"] += r.get("damage_blocked", 0)
-                        entry["damage_received"] += r.get("damage_received", 0)
-                        entry["capture_points"] += r.get("capture_points", 0)
-
-                    game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
-                    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
-
-                else:
-                    lines = []
-                    lines.append(f"Map: {meta['mapName'].title()} | Mode: {room_type} | Duration: {int(meta['battleDuration'])}s")
-                    lines.append("")
-                    team1 = [(pid, p) for pid, p in players.items() if p["team"] == 1]
-                    team2 = [(pid, p) for pid, p in players.items() if p["team"] == 2]
-                    lines.append(f"Team 1{' WINNER' if winner == 1 else ''}")
-                    lines.append("```")
-                    for pid, p in team1:
-                        r = results.get(pid, {})
-                        if r.get("shots", 0) == 0:
-                            continue
-                        lines.append(format_player_line(p, r))
-                        lines.append("")
-                    lines.append("```")
-                    lines.append(f"Team 2{' WINNER' if winner == 2 else ''}")
-                    lines.append("```")
-                    for pid, p in team2:
-                        r = results.get(pid, {})
-                        if r.get("shots", 0) == 0:
-                            continue
-                        lines.append(format_player_line(p, r))
-                        lines.append("")
-                    lines.append("```")
-                    await message.channel.send("\n".join(lines))
-
+                await handle_replay(data, message)
             except Exception as e:
                 await message.channel.send(f"Failed to parse replay: {e}")
+
+        elif attachment.filename.endswith(".zip"):
+            raw = await attachment.read()
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
+                    replays = [n for n in z.namelist() if n.endswith(".wotbreplay")]
+                if not replays:
+                    await message.channel.send("No .wotbreplay files found in that zip.")
+                    continue
+                await message.channel.send(f"Found {len(replays)} replay(s) in zip, processing...")
+                for name in replays:
+                    with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
+                        replay_data = z.read(name)
+                    try:
+                        await handle_replay(replay_data, message)
+                    except Exception as e:
+                        await message.channel.send(f"Failed to parse {name}: {e}")
+            except Exception as e:
+                await message.channel.send(f"Failed to open zip: {e}")
 
 client.run("MTQ5MTkyOTQ4NDA5NjcwMDQ4Ng.GekR-4.nZM6eb-bT7PxgFkx9JfTGeFILnud_0ih6S9qTQ")
