@@ -24,29 +24,17 @@ ROOM_TYPES = {
     25: "Skirmish", 26: "Burning Games"
 }
 
-# vehicleCompDescriptor -> tank name lookup
-# Fallback hardcoded values — gets overwritten at startup by fetch_tankopedia()
 VEHICLE_NAMES = {
-    # Sweden
     4481: "Kranvagn",    20097: "UDES 15/16",  4737: "Emil II",
-    # Japan
     8033: "STB-1",       3937: "Type 61",
-    # Germany
     11281: "Leopard 1",  28689: "E 50 M",       11537: "Leopard PTA",
-    # China
     12849: "121",        13105: "113",           12593: "WZ-111 5A",
-    # USSR
     257: "Object 140",   513: "Object 430U",     769: "IS-7",
     1025: "T-62A",       1281: "Object 907",     4353: "Object 277",
-    # USA
     2049: "M48 Patton",  2305: "T110E5",         2561: "T110E4",
-    # France
     4097: "AMX 50B",
-    # UK
     5633: "FV215b",      5889: "Super Conq.",
-    # Italy
     21505: "Progetto 65",
-    # Poland
     22017: "60TP",
 }
 
@@ -60,7 +48,6 @@ def get_vehicle_name(descriptor):
     return f"{nations.get(nation_id, 'UNK')}-{tank_idx}"
 
 def _fetch_tankopedia_sync():
-    """Blocking tankopedia fetch — runs in a thread via asyncio.to_thread()."""
     import requests
     total_loaded = 0
     try:
@@ -258,7 +245,7 @@ def send_in_chunks(text, max_length=1900):
         chunks.append(current)
     return chunks
 
-def generate_scrim_image(results_list, total_games, map_name):
+def generate_scrim_image(results_list, total_games):
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
@@ -302,14 +289,14 @@ def generate_scrim_image(results_list, total_games, map_name):
         col_x.append(x / total_w)
         x += w
 
-    # Header — simple title + map/games
-    header_h = 0.10
+    # Header — title + game count only
+    header_h = 0.08
     ax.add_patch(plt.Rectangle((0, 1 - header_h), 1, header_h,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
     ax.text(0.5, 1 - header_h * 0.35, "Scrim Stats",
             transform=ax.transAxes, color=TEXT_MAIN,
             fontsize=14, fontweight="bold", ha="center", va="center", zorder=2)
-    ax.text(0.5, 1 - header_h * 0.78, f"{map_name}   ·   {total_games} games",
+    ax.text(0.5, 1 - header_h * 0.78, f"{total_games} games",
             transform=ax.transAxes, color=TEXT_MUT,
             fontsize=9, ha="center", va="center", zorder=2)
 
@@ -485,10 +472,9 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         results_list.sort(key=lambda x: x["score"], reverse=True)
         total_games = max(p["games"] for p in scrim_data.values())
-        map_name = next(iter(scrim_data.values())).get("last_map", "Unknown").title()
 
         try:
-            img_buf = generate_scrim_image(results_list, total_games, map_name)
+            img_buf = generate_scrim_image(results_list, total_games)
             await interaction.followup.send(
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
@@ -543,19 +529,18 @@ async def handle_replay(data, message):
             entry["last_map"]        = map_name
             entry["replay_team"]     = r.get("team", p.get("team", 0))
 
-            # Track tank from vehicle descriptor
             veh_desc = r.get("vehicle_desc", 0)
             if veh_desc:
                 tank_name = get_vehicle_name(veh_desc)
                 entry["tank_counts"][tank_name] += 1
 
-            # Track wins
             if r.get("team") == winner:
                 if r.get("team") == 1:
                     entry["team1_wins"] += 1
                 else:
                     entry["team2_wins"] += 1
 
+        # Send ONE message per replay, outside the player loop
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
         await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
 
