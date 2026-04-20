@@ -6,6 +6,7 @@ import zipfile
 import json
 import struct
 import io
+import asyncio
 from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
@@ -24,6 +25,7 @@ ROOM_TYPES = {
 }
 
 # vehicleCompDescriptor -> tank name lookup
+# Fallback hardcoded values — gets overwritten at startup by fetch_tankopedia()
 VEHICLE_NAMES = {
     # Sweden
     4481: "Kranvagn",    20097: "UDES 15/16",  4737: "Emil II",
@@ -56,6 +58,36 @@ def get_vehicle_name(descriptor):
     nation_id = (descriptor >> 4) & 0xF
     tank_idx = descriptor >> 8
     return f"{nations.get(nation_id, 'UNK')}-{tank_idx}"
+
+def _fetch_tankopedia_sync():
+    """Blocking tankopedia fetch — runs in a thread via asyncio.to_thread()."""
+    import requests
+    total_loaded = 0
+    try:
+        page = 1
+        while True:
+            url = "https://api.wotblitz.com/wotb/encyclopedia/vehicles/"
+            params = {
+                "application_id": wg_api.API_KEY,
+                "fields": "tank_id,name",
+                "page_no": page,
+            }
+            data = requests.get(url, params=params, timeout=10).json()
+            if data.get("status") != "ok":
+                print(f"Tankopedia error: {data}")
+                break
+            vehicles = data.get("data", {})
+            if not vehicles:
+                break
+            for tank_id_str, info in vehicles.items():
+                VEHICLE_NAMES[int(tank_id_str)] = info.get("name", f"Tank-{tank_id_str}")
+                total_loaded += 1
+            if len(vehicles) < 100:
+                break
+            page += 1
+        print(f"Tankopedia loaded: {total_loaded} tanks")
+    except Exception as e:
+        print(f"Tankopedia fetch failed: {e} — using hardcoded fallback")
 
 scrim_active = False
 scrim_data = {}
@@ -226,7 +258,7 @@ def send_in_chunks(text, max_length=1900):
         chunks.append(current)
     return chunks
 
-def generate_scrim_image(results_list, total_games, map_name, team_scores):
+def generate_scrim_image(results_list, total_games, map_name):
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
@@ -270,25 +302,14 @@ def generate_scrim_image(results_list, total_games, map_name, team_scores):
         col_x.append(x / total_w)
         x += w
 
-    # Scoreboard header
-    teams = list(team_scores.keys())
-    score_text = ""
-    winner_text = ""
-    if len(teams) >= 2:
-        t1, t2 = teams[0], teams[1]
-        s1, s2 = team_scores[t1], team_scores[t2]
-        score_text = f"{t1}   {s1}  —  {s2}   {t2}"
-        winner = t1 if s1 > s2 else (t2 if s2 > s1 else "Draw")
-        winner_text = f"{winner} wins" if winner != "Draw" else "Draw"
-
-    header_h = 0.14
+    # Header — simple title + map/games
+    header_h = 0.10
     ax.add_patch(plt.Rectangle((0, 1 - header_h), 1, header_h,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
-    ax.text(0.5, 1 - header_h * 0.28, score_text,
+    ax.text(0.5, 1 - header_h * 0.35, "Scrim Stats",
             transform=ax.transAxes, color=TEXT_MAIN,
-            fontsize=15, fontweight="bold", ha="center", va="center", zorder=2)
-    meta_str = f"{map_name}   ·   {total_games} games   ·   {winner_text}"
-    ax.text(0.5, 1 - header_h * 0.72, meta_str,
+            fontsize=14, fontweight="bold", ha="center", va="center", zorder=2)
+    ax.text(0.5, 1 - header_h * 0.78, f"{map_name}   ·   {total_games} games",
             transform=ax.transAxes, color=TEXT_MUT,
             fontsize=9, ha="center", va="center", zorder=2)
 
@@ -369,6 +390,7 @@ def generate_scrim_image(results_list, total_games, map_name, team_scores):
 @client.event
 async def on_ready():
     await tree.sync()
+    await asyncio.to_thread(_fetch_tankopedia_sync)
     print(f"Logged in as {client.user}")
     print("Slash commands synced!")
     for guild in client.guilds:
@@ -465,26 +487,8 @@ async def scrim(interaction: discord.Interaction, action: str):
         total_games = max(p["games"] for p in scrim_data.values())
         map_name = next(iter(scrim_data.values())).get("last_map", "Unknown").title()
 
-        # Build team name + score from replay teams
-        team1_clan = ""
-        team2_clan = ""
-        team1_wins = 0
-        team2_wins = 0
-        for p in scrim_data.values():
-            if p.get("replay_team") == 1 and p.get("clan_tag") and not team1_clan:
-                team1_clan = f"[{p['clan_tag']}]"
-            if p.get("replay_team") == 2 and p.get("clan_tag") and not team2_clan:
-                team2_clan = f"[{p['clan_tag']}]"
-            team1_wins = max(team1_wins, p.get("team1_wins", 0))
-            team2_wins = max(team2_wins, p.get("team2_wins", 0))
-
-        team_scores = {
-            team1_clan or "Team 1": team1_wins,
-            team2_clan or "Team 2": team2_wins,
-        }
-
         try:
-            img_buf = generate_scrim_image(results_list, total_games, map_name, team_scores)
+            img_buf = generate_scrim_image(results_list, total_games, map_name)
             await interaction.followup.send(
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
