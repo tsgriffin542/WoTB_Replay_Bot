@@ -10,9 +10,6 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import FancyBboxPatch
-import numpy as np
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -26,23 +23,52 @@ ROOM_TYPES = {
     25: "Skirmish", 26: "Burning Games"
 }
 
+# vehicleCompDescriptor -> tank name lookup
+VEHICLE_NAMES = {
+    # Sweden
+    4481: "Kranvagn",    20097: "UDES 15/16",  4737: "Emil II",
+    # Japan
+    8033: "STB-1",       3937: "Type 61",
+    # Germany
+    11281: "Leopard 1",  28689: "E 50 M",       11537: "Leopard PTA",
+    # China
+    12849: "121",        13105: "113",           12593: "WZ-111 5A",
+    # USSR
+    257: "Object 140",   513: "Object 430U",     769: "IS-7",
+    1025: "T-62A",       1281: "Object 907",     4353: "Object 277",
+    # USA
+    2049: "M48 Patton",  2305: "T110E5",         2561: "T110E4",
+    # France
+    4097: "AMX 50B",
+    # UK
+    5633: "FV215b",      5889: "Super Conq.",
+    # Italy
+    21505: "Progetto 65",
+    # Poland
+    22017: "60TP",
+}
+
+def get_vehicle_name(descriptor):
+    if descriptor in VEHICLE_NAMES:
+        return VEHICLE_NAMES[descriptor]
+    nations = {0:"USSR", 1:"GER", 2:"USA", 3:"CHN", 4:"FRA",
+               5:"UK", 6:"JPN", 7:"CZE", 8:"SWE", 9:"POL", 10:"ITA"}
+    nation_id = (descriptor >> 4) & 0xF
+    tank_idx = descriptor >> 8
+    return f"{nations.get(nation_id, 'UNK')}-{tank_idx}"
+
 scrim_active = False
-scrim_data = defaultdict(lambda: {
-    "nickname": "",
-    "clan_tag": None,
-    "games": 0,
-    "damage": 0,
-    "kills": 0,
-    "shots": 0,
-    "hits": 0,
-    "penetrations": 0,
-    "blocked": 0,
-    "damage_received": 0,
-    "capture_points": 0,
-    "assisted_damage": 0,
-    "survived": 0,
-    "tank_counts": defaultdict(int),
-})
+scrim_data = {}
+
+def fresh_entry():
+    return {
+        "nickname": "", "clan_tag": None, "games": 0, "damage": 0,
+        "kills": 0, "shots": 0, "hits": 0, "penetrations": 0,
+        "blocked": 0, "damage_received": 0, "capture_points": 0,
+        "assisted_damage": 0, "survived": 0, "tank_counts": defaultdict(int),
+        "last_map": "Unknown", "replay_team": 0,
+        "team1_wins": 0, "team2_wins": 0,
+    }
 
 def read_varint(data, pos):
     result = 0
@@ -93,7 +119,7 @@ def parse_player_info(data):
     return {
         "nickname": decode_string(f.get(1, [b""])[0]),
         "team": f.get(3, [0])[0],
-        "clan_tag": decode_string(f.get(5, [b""])[0]) if 5 in f else None
+        "clan_tag": decode_string(f.get(5, [b""])[0]) if 5 in f else None,
     }
 
 def parse_player(data):
@@ -104,24 +130,26 @@ def parse_player(data):
 
 def parse_player_results_info(data):
     f = parse_message(data)
+    survived_raw = f.get(13, [0])[0]
     return {
-        "account_id": f.get(101, [0])[0],
-        "damage_dealt": f.get(8, [0])[0],
-        "kills": f.get(18, [0])[0],
-        "shots": f.get(4, [0])[0],
-        "hits": f.get(5, [0])[0],
-        "penetrations": f.get(7, [0])[0],
-        "damage_blocked": f.get(117, [0])[0],
-        "damage_received": f.get(11, [0])[0],
-        "capture_points": f.get(14, [0])[0],
-        "damage_assisted": f.get(15, [0])[0],
-        "survived": f.get(23, [0])[0],
+        "account_id":       f.get(101, [0])[0],
+        "damage_dealt":     f.get(8,   [0])[0],
+        "kills":            f.get(18,  [0])[0],
+        "shots":            f.get(4,   [0])[0],
+        "hits":             f.get(5,   [0])[0],
+        "penetrations":     f.get(7,   [0])[0],
+        "damage_blocked":   f.get(117, [0])[0],
+        "damage_received":  f.get(11,  [0])[0],
+        "capture_points":   f.get(14,  [0])[0],
+        "damage_assisted":  f.get(15,  [0])[0],
+        "survived":         1 if survived_raw > 0 else 0,
+        "vehicle_desc":     f.get(103, [0])[0],
+        "team":             f.get(102, [0])[0],
     }
 
 def parse_player_results(data):
     f = parse_message(data)
-    info = parse_player_results_info(f[2][0]) if 2 in f else {}
-    return info
+    return parse_player_results_info(f[2][0]) if 2 in f else {}
 
 def parse_replay_bytes(data):
     with zipfile.ZipFile(io.BytesIO(data), "r") as z:
@@ -199,15 +227,11 @@ def send_in_chunks(text, max_length=1900):
     return chunks
 
 def generate_scrim_image(results_list, total_games, map_name, team_scores):
-    """Generate a dark-themed scrim stats image and return as bytes."""
-
-    # --- Colors ---
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
     ROW_EVEN  = "#13131f"
     DIVIDER   = "#1a1a2e"
-    BORDER    = "#2a2a3e"
     TEXT_MAIN = "#ffffff"
     TEXT_MUT  = "#aaaaaa"
     TEXT_HEAD = "#7ec8e3"
@@ -216,144 +240,122 @@ def generate_scrim_image(results_list, total_games, map_name, team_scores):
     RED       = "#f87171"
     PURPLE    = "#a78bfa"
 
-    # Column definitions: (header, key, width_ratio)
     COLS = [
-        ("Player",      "name",       2.4),
-        ("Main",        "main_tank",  1.4),
-        ("Games",       "games",      0.7),
-        ("Score",       "score",      0.7),
-        ("Avg DMG",     "avg_dmg",    1.0),
-        ("DMG Share",   "dmg_share",  1.0),
-        ("Kills",       "avg_kills",  0.7),
-        ("DMG Ratio",   "dmg_ratio",  1.0),
-        ("Pen%",        "pen_pct",    0.7),
-        ("Survived",    "survived",   0.9),
-        ("Shots/G",     "shots_g",    0.8),
-        ("Avg Assist",  "avg_assist", 1.0),
+        ("Player",     2.4),
+        ("Main",       1.5),
+        ("Games",      0.7),
+        ("Score",      0.7),
+        ("Avg DMG",    1.0),
+        ("DMG Share",  1.0),
+        ("Kills",      0.7),
+        ("DMG Ratio",  1.0),
+        ("Pen%",       0.7),
+        ("Survived",   0.9),
+        ("Shots/G",    0.8),
+        ("Avg Assist", 1.0),
     ]
 
-    n_rows = len(results_list) + len(set(r["team"] for r in results_list))  # players + dividers
-    fig_height = 2.8 + n_rows * 0.38
-    fig_width = 18
+    n_rows = len(results_list)
+    fig_height = 2.2 + n_rows * 0.42
+    fig_width = 20
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     fig.patch.set_facecolor(BG)
     ax.set_facecolor(BG)
     ax.axis("off")
 
-    total_w = sum(c[2] for c in COLS)
+    total_w = sum(c[1] for c in COLS)
     col_x = []
     x = 0
-    for _, _, w in COLS:
+    for _, w in COLS:
         col_x.append(x / total_w)
         x += w
 
-    # --- Scoreboard header ---
+    # Scoreboard header
     teams = list(team_scores.keys())
     score_text = ""
     winner_text = ""
-    if len(teams) == 2:
+    if len(teams) >= 2:
         t1, t2 = teams[0], teams[1]
         s1, s2 = team_scores[t1], team_scores[t2]
         score_text = f"{t1}   {s1}  —  {s2}   {t2}"
         winner = t1 if s1 > s2 else (t2 if s2 > s1 else "Draw")
         winner_text = f"{winner} wins" if winner != "Draw" else "Draw"
 
-    header_h = 0.13
+    header_h = 0.14
     ax.add_patch(plt.Rectangle((0, 1 - header_h), 1, header_h,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
-    ax.text(0.5, 1 - header_h * 0.3, score_text,
+    ax.text(0.5, 1 - header_h * 0.28, score_text,
             transform=ax.transAxes, color=TEXT_MAIN,
             fontsize=15, fontweight="bold", ha="center", va="center", zorder=2)
     meta_str = f"{map_name}   ·   {total_games} games   ·   {winner_text}"
-    ax.text(0.5, 1 - header_h * 0.75, meta_str,
+    ax.text(0.5, 1 - header_h * 0.72, meta_str,
             transform=ax.transAxes, color=TEXT_MUT,
             fontsize=9, ha="center", va="center", zorder=2)
 
-    # --- Column headers ---
-    col_header_y = 1 - header_h - 0.06
-    ax.add_patch(plt.Rectangle((0, col_header_y - 0.01), 1, 0.065,
+    # Column headers
+    col_header_y = 1 - header_h - 0.055
+    ax.add_patch(plt.Rectangle((0, col_header_y - 0.005), 1, 0.06,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
-    for i, (label, _, _) in enumerate(COLS):
+    for i, (label, _) in enumerate(COLS):
         ha = "left" if i == 0 else "center"
-        xpos = col_x[i] + (0.01 if i == 0 else 0)
-        ax.text(xpos, col_header_y + 0.02, label,
+        xpos = col_x[i] + (0.008 if i == 0 else 0)
+        ax.text(xpos, col_header_y + 0.022, label,
                 transform=ax.transAxes, color=TEXT_HEAD,
                 fontsize=8, fontweight="bold", ha=ha, va="center", zorder=2)
 
-    # --- Group players by team ---
-    teams_order = []
-    seen = set()
-    for r in results_list:
-        t = r["team"]
-        if t not in seen:
-            teams_order.append(t)
-            seen.add(t)
+    # DMG share per team
+    team1_total = sum(r["avg_dmg"] for r in results_list if r.get("replay_team") == 1)
+    team2_total = sum(r["avg_dmg"] for r in results_list if r.get("replay_team") == 2)
 
-    # Calculate DMG share per team
-    team_totals = {}
-    for t in teams_order:
-        team_totals[t] = sum(r["avg_dmg"] for r in results_list if r["team"] == t)
+    row_h = 0.048
+    y = col_header_y - 0.01
+    for idx, r in enumerate(results_list):
+        row_color = ROW_ODD if idx % 2 == 0 else ROW_EVEN
+        ax.add_patch(plt.Rectangle((0, y - row_h), 1, row_h,
+                                    transform=ax.transAxes, color=row_color, zorder=1))
 
-    # --- Draw rows ---
-    row_h = 0.042
-    y = col_header_y - 0.015
-    row_idx = 0
+        team_total = team1_total if r.get("replay_team") == 1 else team2_total
+        dmg_share = round(r["avg_dmg"] / team_total * 100, 1) if team_total > 0 else 0.0
 
-    for t in teams_order:
-        # Divider row
-        y -= row_h * 0.8
-        ax.add_patch(plt.Rectangle((0, y - row_h * 0.1), 1, row_h * 0.9,
-                                    transform=ax.transAxes, color=DIVIDER, zorder=1))
-        team_total_dmg = team_totals[t]
-        ax.text(0.005, y + row_h * 0.3, f"{t}   ·   Team total avg DMG: {team_total_dmg:,}",
-                transform=ax.transAxes, color="#555566",
-                fontsize=7.5, ha="left", va="center", zorder=2)
-        y -= row_h * 0.6
+        score = r["score"]
+        score_color = GREEN if score >= 70 else (YELLOW if score >= 50 else RED)
+        survived_color = GREEN if r["survived_pct"] >= 50 else RED
 
-        for r in results_list:
-            if r["team"] != t:
-                continue
+        values = [
+            (r["name"],               TEXT_MAIN,     "left"),
+            (r["main_tank"],          PURPLE,        "center"),
+            (str(r["games"]),         TEXT_MUT,      "center"),
+            (str(score),              score_color,   "center"),
+            (f"{r['avg_dmg']:,}",     TEXT_MUT,      "center"),
+            (f"{dmg_share}%",         TEXT_MUT,      "center"),
+            (str(r["avg_kills"]),     TEXT_MUT,      "center"),
+            (str(r["dmg_ratio"]),     TEXT_MUT,      "center"),
+            (f"{r['pen_pct']}%",      TEXT_MUT,      "center"),
+            (f"{r['survived_pct']}%", survived_color,"center"),
+            (str(r["shots_g"]),       TEXT_MUT,      "center"),
+            (f"{r['avg_assist']:,}",  TEXT_MUT,      "center"),
+        ]
 
-            row_color = ROW_ODD if row_idx % 2 == 0 else ROW_EVEN
-            ax.add_patch(plt.Rectangle((0, y - row_h), 1, row_h,
-                                        transform=ax.transAxes, color=row_color, zorder=1))
+        for i, (val, color, ha) in enumerate(values):
+            xpos = col_x[i] + (0.006 if ha == "left" else 0)
+            ax.text(xpos, y - row_h * 0.48, val,
+                    transform=ax.transAxes, color=color,
+                    fontsize=9, ha=ha, va="center", zorder=2)
 
-            dmg_share = round(r["avg_dmg"] / team_totals[t] * 100, 1) if team_totals[t] > 0 else 0
-            score = r["score"]
-            score_color = GREEN if score >= 70 else (YELLOW if score >= 50 else RED)
-            survived_color = GREEN if r["survived_pct"] >= 50 else RED
+        y -= row_h
 
-            values = [
-                (r["name"],             TEXT_MAIN,  "left"),
-                (r["main_tank"],        PURPLE,     "center"),
-                (str(r["games"]),       TEXT_MUT,   "center"),
-                (str(score),            score_color,"center"),
-                (f"{r['avg_dmg']:,}",   TEXT_MUT,   "center"),
-                (f"{dmg_share}%",       TEXT_MUT,   "center"),
-                (str(r["avg_kills"]),   TEXT_MUT,   "center"),
-                (str(r["dmg_ratio"]),   TEXT_MUT,   "center"),
-                (f"{r['pen_pct']}%",    TEXT_MUT,   "center"),
-                (f"{r['survived_pct']}%", survived_color, "center"),
-                (str(r["shots_g"]),     TEXT_MUT,   "center"),
-                (f"{r['avg_assist']:,}", TEXT_MUT,  "center"),
-            ]
-
-            for i, (val, color, ha) in enumerate(values):
-                xpos = col_x[i] + (0.005 if ha == "left" else 0)
-                ax.text(xpos, y - row_h * 0.45, val,
-                        transform=ax.transAxes, color=color,
-                        fontsize=8.5, ha=ha, va="center", zorder=2)
-
-            y -= row_h
-            row_idx += 1
-
-    # --- Footer ---
-    ax.add_patch(plt.Rectangle((0, 0), 1, 0.04,
+    # Footer
+    footer_h = 0.045
+    ax.add_patch(plt.Rectangle((0, 0), 1, footer_h,
                                 transform=ax.transAxes, color=DIVIDER, zorder=1))
-    ax.text(0.01, 0.02, "Score:  70+ high   50–69 mid   <50 low",
-            transform=ax.transAxes, color="#555566", fontsize=7.5, ha="left", va="center")
-    ax.text(0.99, 0.02, "Generated by WoTB Replay Bot",
-            transform=ax.transAxes, color="#555566", fontsize=7.5, ha="right", va="center")
+    ax.text(0.01, footer_h * 0.5,
+            "Score:  70+ high   50-69 mid   <50 low",
+            transform=ax.transAxes, color="#666677",
+            fontsize=7.5, ha="left", va="center")
+    ax.text(0.99, footer_h * 0.5,
+            "Generated by WoTB Replay Bot",
+            transform=ax.transAxes, color="#666677",
+            fontsize=7.5, ha="right", va="center")
 
     plt.tight_layout(pad=0)
     buf = io.BytesIO()
@@ -410,22 +412,7 @@ async def scrim(interaction: discord.Interaction, action: str):
 
     if action.lower() == "start":
         scrim_active = True
-        scrim_data = defaultdict(lambda: {
-            "nickname": "",
-            "clan_tag": None,
-            "games": 0,
-            "damage": 0,
-            "kills": 0,
-            "shots": 0,
-            "hits": 0,
-            "penetrations": 0,
-            "blocked": 0,
-            "damage_received": 0,
-            "capture_points": 0,
-            "assisted_damage": 0,
-            "survived": 0,
-            "tank_counts": defaultdict(int),
-        })
+        scrim_data = {}
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
     elif action.lower() == "end":
@@ -445,32 +432,29 @@ async def scrim(interaction: discord.Interaction, action: str):
             if shots == 0:
                 continue
 
-            avg_dmg     = round(p["damage"] / games)
-            avg_kills   = round(p["kills"] / games, 1)
-            avg_blocked = round(p["blocked"] / games)
-            avg_cap_pts = round(p["capture_points"] / games)
-            avg_assist  = round(p["assisted_damage"] / games)
-            survived_pct= round(p["survived"] / games * 100)
-            shots_g     = round(p["shots"] / games, 1)
-            pen_pct     = round(p["penetrations"] / shots * 100) if shots > 0 else 0
-            dmg_ratio   = round(p["damage"] / p["damage_received"], 2) if p["damage_received"] > 0 else "inf"
-            score       = calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills,
-                                     dmg_ratio if dmg_ratio != "inf" else 10)
-            clan        = f"[{p['clan_tag']}]" if p.get("clan_tag") else ""
-            main_tank   = max(p["tank_counts"], key=p["tank_counts"].get) if p["tank_counts"] else "Unknown"
+            avg_dmg      = round(p["damage"] / games)
+            avg_kills    = round(p["kills"] / games, 1)
+            avg_blocked  = round(p["blocked"] / games)
+            avg_assist   = round(p["assisted_damage"] / games)
+            survived_pct = round(p["survived"] / games * 100)
+            shots_g      = round(p["shots"] / games, 1)
+            pen_pct      = round(p["penetrations"] / shots * 100) if shots > 0 else 0
+            dmg_ratio    = round(p["damage"] / p["damage_received"], 2) if p["damage_received"] > 0 else "inf"
+            score        = calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills,
+                                      dmg_ratio if dmg_ratio != "inf" else 10)
+            clan         = f"[{p['clan_tag']}]" if p.get("clan_tag") else ""
+            main_tank    = max(p["tank_counts"], key=p["tank_counts"].get) if p["tank_counts"] else "?"
 
             results_list.append({
                 "name":         f"{clan} {p['nickname']}".strip(),
-                "team":         clan if clan else "No Clan",
                 "clan_tag":     p.get("clan_tag") or "",
+                "replay_team":  p.get("replay_team", 0),
                 "games":        games,
                 "avg_dmg":      avg_dmg,
                 "avg_kills":    avg_kills,
-                "avg_blocked":  avg_blocked,
                 "pen_pct":      pen_pct,
                 "dmg_ratio":    dmg_ratio,
                 "score":        score,
-                "avg_cap_pts":  avg_cap_pts,
                 "avg_assist":   avg_assist,
                 "survived_pct": survived_pct,
                 "shots_g":      shots_g,
@@ -479,19 +463,25 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         results_list.sort(key=lambda x: x["score"], reverse=True)
         total_games = max(p["games"] for p in scrim_data.values())
+        map_name = next(iter(scrim_data.values())).get("last_map", "Unknown").title()
 
-        # Build team scores (wins per clan tag)
-        team_scores = defaultdict(int)
+        # Build team name + score from replay teams
+        team1_clan = ""
+        team2_clan = ""
+        team1_wins = 0
+        team2_wins = 0
         for p in scrim_data.values():
-            clan = f"[{p['clan_tag']}]" if p.get("clan_tag") else "No Clan"
-            team_scores[clan] += p.get("wins", 0)
+            if p.get("replay_team") == 1 and p.get("clan_tag") and not team1_clan:
+                team1_clan = f"[{p['clan_tag']}]"
+            if p.get("replay_team") == 2 and p.get("clan_tag") and not team2_clan:
+                team2_clan = f"[{p['clan_tag']}]"
+            team1_wins = max(team1_wins, p.get("team1_wins", 0))
+            team2_wins = max(team2_wins, p.get("team2_wins", 0))
 
-        # Group by clan
-        for r in results_list:
-            clan = f"[{r['clan_tag']}]" if r["clan_tag"] else "No Clan"
-            r["team"] = clan
-
-        map_name = scrim_data[list(scrim_data.keys())[0]].get("last_map", "Unknown Map").title()
+        team_scores = {
+            team1_clan or "Team 1": team1_wins,
+            team2_clan or "Team 2": team2_wins,
+        }
 
         try:
             img_buf = generate_scrim_image(results_list, total_games, map_name, team_scores)
@@ -499,7 +489,6 @@ async def scrim(interaction: discord.Interaction, action: str):
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
         except Exception as e:
-            # Fallback to text if image fails
             lines = [f"Scrim Results - {total_games} games", ""]
             for i, p in enumerate(results_list, 1):
                 lines.append(f"{i}. {p['name']} ({p['games']} games) | Score: {p['score']}/100")
@@ -523,37 +512,45 @@ async def handle_replay(data, message):
     room_type_id = meta.get("arenaBonusType", -1)
     room_type = ROOM_TYPES.get(room_type_id, "Unknown")
     map_name = meta.get("mapName", "Unknown")
-    tank_name = meta.get("playerVehicle", "Unknown")
 
     if scrim_active:
         for pid, p in players.items():
             r = results.get(pid, {})
             if r.get("shots", 0) == 0:
                 continue
+
+            if pid not in scrim_data:
+                scrim_data[pid] = fresh_entry()
+
             entry = scrim_data[pid]
-            entry["nickname"] = p.get("nickname", "")
-            entry["clan_tag"] = p.get("clan_tag")
-            entry["games"] += 1
-            entry["damage"] += r.get("damage_dealt", 0)
-            entry["kills"] += r.get("kills", 0)
-            entry["shots"] += r.get("shots", 0)
-            entry["hits"] += r.get("hits", 0)
-            entry["penetrations"] += r.get("penetrations", 0)
-            entry["blocked"] += r.get("damage_blocked", 0)
-            entry["damage_received"] += r.get("damage_received", 0)
+            entry["nickname"]        = p.get("nickname", "")
+            entry["clan_tag"]        = p.get("clan_tag")
+            entry["games"]          += 1
+            entry["damage"]         += r.get("damage_dealt", 0)
+            entry["kills"]          += r.get("kills", 0)
+            entry["shots"]          += r.get("shots", 0)
+            entry["hits"]           += r.get("hits", 0)
+            entry["penetrations"]   += r.get("penetrations", 0)
+            entry["blocked"]        += r.get("damage_blocked", 0)
+            entry["damage_received"]+= r.get("damage_received", 0)
             entry["capture_points"] += r.get("capture_points", 0)
-            entry["assisted_damage"] += r.get("damage_assisted", 0)
-            entry["survived"] += r.get("survived", 0)
-            entry["last_map"] = map_name
+            entry["assisted_damage"]+= r.get("damage_assisted", 0)
+            entry["survived"]       += r.get("survived", 0)
+            entry["last_map"]        = map_name
+            entry["replay_team"]     = r.get("team", p.get("team", 0))
 
-            # Track tank usage per player
-            if "tank_counts" not in entry or not isinstance(entry["tank_counts"], defaultdict):
-                entry["tank_counts"] = defaultdict(int)
-
-            # Use the uploader's tank from meta if this is the uploader
-            uploader_name = meta.get("playerName", "")
-            if p.get("nickname") == uploader_name:
+            # Track tank from vehicle descriptor
+            veh_desc = r.get("vehicle_desc", 0)
+            if veh_desc:
+                tank_name = get_vehicle_name(veh_desc)
                 entry["tank_counts"][tank_name] += 1
+
+            # Track wins
+            if r.get("team") == winner:
+                if r.get("team") == 1:
+                    entry["team1_wins"] += 1
+                else:
+                    entry["team2_wins"] += 1
 
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
         await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
@@ -584,10 +581,9 @@ async def handle_replay(data, message):
         lines.append("```")
         await message.channel.send("\n".join(lines))
 
+
 @client.event
 async def on_message(message):
-    global scrim_data
-
     if message.author == client.user:
         return
 
