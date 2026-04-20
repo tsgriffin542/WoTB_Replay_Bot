@@ -25,65 +25,27 @@ ROOM_TYPES = {
 
 # vehicleCompDescriptor -> tank name lookup
 VEHICLE_NAMES = {
-    # USSR (nation 0)
-    257:  "Object 140",   513:  "Object 430U",  769:  "IS-7",
-    1025: "T-62A",        1281: "Object 907",   1537: "Object 430",
-    1793: "IS-4",         2049: "Object 268",   2305: "Object 263",
-    2561: "T-10",         2817: "Object 705A",  3073: "Object 277",
-    3329: "Object 780",   3585: "K-91",         3841: "Object 279e",
-    4097: "IS-3",         4353: "Object 252U",  4609: "SU-130PM",
-    4865: "Object 268 v5",5121: "Object 257",   5377: "T-54",
-    5633: "Object 416",   5889: "SU-101",       6145: "Object 704",
-    6401: "IS-2",         6657: "KV-4",         6913: "ST-I",
-    # Germany (nation 1)
-    272:  "E 50 M",       528:  "Leopard 1",     784:  "E 100",
-    1040: "Maus",         1296: "Leopard PTA",  1552: "E 75",
-    1808: "Tiger II",     2064: "VK 45.02B",    2320: "Grille 15",
-    2576: "Jagdpanzer E", 2832: "Pz. VII",      3088: "Kpz 07 RH",
-    3344: "MBT-B",        3600: "VK 72.01K",    3856: "Rhm. Skorpion",
-    4112: "Tiger I",      4368: "Panther",       4624: "VK 30.02M",
-    # USA (nation 2)
-    289:  "M48 Patton",   545:  "T110E5",        801:  "T110E4",
-    1057: "T110E3",       1313: "M60",           1569: "T57 Heavy",
-    1825: "T54E1",        2081: "T49",           2337: "T95E6",
-    2593: "M46 Patton",   2849: "T32",           3105: "T29",
-    3361: "M4A1 Rev.",    3617: "T26E5",         3873: "Super Hellcat",
-    # China (nation 3)
-    306:  "121",          562:  "113",           818:  "WZ-111 5A",
-    1074: "WZ-111 QL",   1330: "121B",          1586: "WZ-132-1",
-    1842: "WZ-120",      2098: "112",            2354: "59-Patton",
-    2610: "T-34-3",      2866: "WZ-111",         3122: "WZ-113G FT",
-    # France (nation 4)
-    323:  "AMX 50B",      579:  "AMX M4 54",     835:  "Bat.-Chatillon 25t",
-    1091: "AMX 30B",     1347: "AMX 13 105",    1603: "Bat.-Chat. 12t",
-    1859: "Lorraine 40t", 2115: "AMX 50 100",   2371: "EBR 105",
-    2627: "AMX 50 Foch B",
-    # UK (nation 5)
-    340:  "FV215b",       596:  "Super Conq.",   852:  "FV4005",
-    1108: "Chieftain Mk6",1364: "FV215b 183",   1620: "Centurion AX",
-    1876: "Caernarvon AX",2132: "GSOR 1008",    2388: "FV4202",
-    # Japan (nation 6)
-    357:  "STB-1",        613:  "Type 61",       869:  "STA-1",
-    1125: "STA-2",       1381: "Type 5 Heavy",  1637: "Type 4 Heavy",
-    1893: "O-Ho",        2149: "Chi-Ri",
-    # Czechoslovakia (nation 7)
-    374:  "TVP T 50/51",  630:  "Skoda T 50",    886:  "TVP VTU",
-    1142: "Skoda T27",
-    # Sweden (nation 8)
-    391:  "Kranvagn",     647:  "UDES 15/16",    903:  "Emil II",
-    1159: "UDES 03",     1415: "Strv 103B",     1671: "Strv 81",
-    1927: "Lansen C",    2183: "Strv S1",
-    # Poland (nation 9)
-    408:  "60TP",         664:  "CS-63",          920:  "50TP prot.",
-    1176: "53TP",        1432: "45TP",
-    # Italy (nation 10)
-    425:  "Progetto 65",  681:  "Carro 45t",      937:  "Progetto 54",
-    1193: "Progetto 46",
-    # Confirmed directly from replay files
-    4481:  "Kranvagn",    20097: "UDES 15/16",
-    8033:  "STB-1",       3937:  "Type 61",
-    11281: "Leopard 1",   28689: "E 50 M",
-    12849: "121",         13105: "113",         12593: "WZ-111 5A",
+    # Sweden
+    4481: "Kranvagn",    20097: "UDES 15/16",  4737: "Emil II",
+    # Japan
+    8033: "STB-1",       3937: "Type 61",
+    # Germany
+    11281: "Leopard 1",  28689: "E 50 M",       11537: "Leopard PTA",
+    # China
+    12849: "121",        13105: "113",           12593: "WZ-111 5A",
+    # USSR
+    257: "Object 140",   513: "Object 430U",     769: "IS-7",
+    1025: "T-62A",       1281: "Object 907",     4353: "Object 277",
+    # USA
+    2049: "M48 Patton",  2305: "T110E5",         2561: "T110E4",
+    # France
+    4097: "AMX 50B",
+    # UK
+    5633: "FV215b",      5889: "Super Conq.",
+    # Italy
+    21505: "Progetto 65",
+    # Poland
+    22017: "60TP",
 }
 
 def get_vehicle_name(descriptor):
@@ -95,36 +57,6 @@ def get_vehicle_name(descriptor):
     tank_idx = descriptor >> 8
     return f"{nations.get(nation_id, 'UNK')}-{tank_idx}"
 
-async def fetch_tankopedia():
-    """Fetch full tank list from WG API and populate VEHICLE_NAMES."""
-    import requests as req
-    app_id = wg_api.API_KEY
-    page = 1
-    total_loaded = 0
-    try:
-        while True:
-            url = (
-                f"https://api.wotblitz.com/wotb/encyclopedia/vehicles/"
-                f"?application_id={app_id}&fields=tank_id,name&page_no={page}"
-            )
-            data = req.get(url).json()
-            if data.get("status") != "ok":
-                print(f"Tankopedia error: {data}")
-                break
-            vehicles = data.get("data", {})
-            if not vehicles:
-                break
-            for tank_id_str, info in vehicles.items():
-                tank_id = int(tank_id_str)
-                VEHICLE_NAMES[tank_id] = info.get("name", f"Tank-{tank_id}")
-                total_loaded += 1
-            if len(vehicles) < 100:
-                break
-            page += 1
-        print(f"Tankopedia loaded: {total_loaded} tanks")
-    except Exception as e:
-        print(f"Failed to load tankopedia: {e} — falling back to hardcoded names")
-
 scrim_active = False
 scrim_data = {}
 
@@ -135,7 +67,7 @@ def fresh_entry():
         "blocked": 0, "damage_received": 0, "capture_points": 0,
         "assisted_damage": 0, "survived": 0, "tank_counts": defaultdict(int),
         "last_map": "Unknown", "replay_team": 0,
-        "team1_wins": 0, "team2_wins": 0, "battle_date": 0,
+        "team1_wins": 0, "team2_wins": 0,
     }
 
 def read_varint(data, pos):
@@ -294,7 +226,7 @@ def send_in_chunks(text, max_length=1900):
         chunks.append(current)
     return chunks
 
-def generate_scrim_image(results_list, total_games, map_name):
+def generate_scrim_image(results_list, total_games, map_name, team_scores):
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
@@ -338,14 +270,25 @@ def generate_scrim_image(results_list, total_games, map_name):
         col_x.append(x / total_w)
         x += w
 
-    # Simple header
-    header_h = 0.10
+    # Scoreboard header
+    teams = list(team_scores.keys())
+    score_text = ""
+    winner_text = ""
+    if len(teams) >= 2:
+        t1, t2 = teams[0], teams[1]
+        s1, s2 = team_scores[t1], team_scores[t2]
+        score_text = f"{t1}   {s1}  —  {s2}   {t2}"
+        winner = t1 if s1 > s2 else (t2 if s2 > s1 else "Draw")
+        winner_text = f"{winner} wins" if winner != "Draw" else "Draw"
+
+    header_h = 0.14
     ax.add_patch(plt.Rectangle((0, 1 - header_h), 1, header_h,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
-    ax.text(0.5, 1 - header_h * 0.38, "Scrim Stats",
+    ax.text(0.5, 1 - header_h * 0.28, score_text,
             transform=ax.transAxes, color=TEXT_MAIN,
-            fontsize=14, fontweight="bold", ha="center", va="center", zorder=2)
-    ax.text(0.5, 1 - header_h * 0.78, f"{map_name}   ·   {total_games} games",
+            fontsize=15, fontweight="bold", ha="center", va="center", zorder=2)
+    meta_str = f"{map_name}   ·   {total_games} games   ·   {winner_text}"
+    ax.text(0.5, 1 - header_h * 0.72, meta_str,
             transform=ax.transAxes, color=TEXT_MUT,
             fontsize=9, ha="center", va="center", zorder=2)
 
@@ -426,7 +369,6 @@ def generate_scrim_image(results_list, total_games, map_name):
 @client.event
 async def on_ready():
     await tree.sync()
-    await fetch_tankopedia()
     print(f"Logged in as {client.user}")
     print("Slash commands synced!")
     for guild in client.guilds:
@@ -521,8 +463,7 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         results_list.sort(key=lambda x: x["score"], reverse=True)
         total_games = max(p["games"] for p in scrim_data.values())
-        first_entry = next(iter(scrim_data.values()))
-        map_name = first_entry.get("last_map", "Unknown").title()
+        map_name = next(iter(scrim_data.values())).get("last_map", "Unknown").title()
 
         # Build team name + score from replay teams
         team1_clan = ""
@@ -543,7 +484,7 @@ async def scrim(interaction: discord.Interaction, action: str):
         }
 
         try:
-            img_buf = generate_scrim_image(results_list, total_games, map_name)
+            img_buf = generate_scrim_image(results_list, total_games, map_name, team_scores)
             await interaction.followup.send(
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
@@ -596,7 +537,6 @@ async def handle_replay(data, message):
             entry["assisted_damage"]+= r.get("damage_assisted", 0)
             entry["survived"]       += r.get("survived", 0)
             entry["last_map"]        = map_name
-            entry["battle_date"]     = meta.get("battleStartTime", 0)
             entry["replay_team"]     = r.get("team", p.get("team", 0))
 
             # Track tank from vehicle descriptor
