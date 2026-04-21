@@ -78,6 +78,8 @@ def _fetch_tankopedia_sync():
 
 scrim_active = False
 scrim_data = {}
+processed_message_ids = set()  # deduplicate Discord message events
+replay_lock = None  # initialized in on_ready
 
 def fresh_entry():
     return {
@@ -250,7 +252,6 @@ def generate_scrim_image(results_list, total_games):
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
     ROW_EVEN  = "#13131f"
-    DIVIDER   = "#1a1a2e"
     TEXT_MAIN = "#ffffff"
     TEXT_MUT  = "#aaaaaa"
     TEXT_HEAD = "#7ec8e3"
@@ -271,7 +272,7 @@ def generate_scrim_image(results_list, total_games):
         ("Pen%",       0.7),
         ("Survived",   0.9),
         ("Shots/G",    0.8),
-        ("Avg Assist", 1.0),
+        ("Avg Blocked", 1.0),
     ]
 
     n_rows = len(results_list)
@@ -289,7 +290,6 @@ def generate_scrim_image(results_list, total_games):
         col_x.append(x / total_w)
         x += w
 
-    # Header — title + game count + corner labels
     header_h = 0.08
     ax.add_patch(plt.Rectangle((0, 1 - header_h), 1, header_h,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
@@ -308,7 +308,6 @@ def generate_scrim_image(results_list, total_games):
             transform=ax.transAxes, color="#666677",
             fontsize=9, ha="right", va="center", zorder=2)
 
-    # Column headers
     col_header_y = 1 - header_h - 0.055
     ax.add_patch(plt.Rectangle((0, col_header_y - 0.005), 1, 0.06,
                                 transform=ax.transAxes, color=HEADER_BG, zorder=1))
@@ -319,7 +318,6 @@ def generate_scrim_image(results_list, total_games):
                 transform=ax.transAxes, color=TEXT_HEAD,
                 fontsize=8, fontweight="bold", ha=ha, va="center", zorder=2)
 
-    # DMG share per team
     team1_total = sum(r["avg_dmg"] for r in results_list if r.get("replay_team") == 1)
     team2_total = sum(r["avg_dmg"] for r in results_list if r.get("replay_team") == 2)
 
@@ -349,7 +347,7 @@ def generate_scrim_image(results_list, total_games):
             (f"{r['pen_pct']}%",      TEXT_MUT,      "center"),
             (f"{r['survived_pct']}%", survived_color,"center"),
             (str(r["shots_g"]),       TEXT_MUT,      "center"),
-            (f"{r['avg_assist']:,}",  TEXT_MUT,      "center"),
+            (f"{r['avg_blocked']:,}", TEXT_MUT,      "center"),
         ]
 
         for i, (val, color, ha) in enumerate(values):
@@ -359,8 +357,6 @@ def generate_scrim_image(results_list, total_games):
                     fontsize=9, ha=ha, va="center", zorder=2)
 
         y -= row_h
-
-
 
     plt.tight_layout(pad=0)
     buf = io.BytesIO()
@@ -373,6 +369,8 @@ def generate_scrim_image(results_list, total_games):
 
 @client.event
 async def on_ready():
+    global replay_lock
+    replay_lock = asyncio.Lock()
     await tree.sync()
     await asyncio.to_thread(_fetch_tankopedia_sync)
     print(f"Logged in as {client.user}")
@@ -419,6 +417,7 @@ async def scrim(interaction: discord.Interaction, action: str):
     if action.lower() == "start":
         scrim_active = True
         scrim_data = {}
+        processed_message_ids.clear()
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
     elif action.lower() == "end":
@@ -464,6 +463,7 @@ async def scrim(interaction: discord.Interaction, action: str):
                 "dmg_ratio":    dmg_ratio,
                 "score":        score,
                 "avg_assist":   avg_assist,
+                "avg_blocked":  avg_blocked,
                 "survived_pct": survived_pct,
                 "shots_g":      shots_g,
                 "main_tank":    main_tank,
@@ -498,15 +498,10 @@ async def scrim(interaction: discord.Interaction, action: str):
 
 async def handle_replay(data, message):
     meta, players, results, winner = parse_replay_bytes(data)
-    room_type_id = meta.get("arenaBonusType", -1)
-    room_type = ROOM_TYPES.get(room_type_id, "Unknown")
     map_name = meta.get("mapName", "Unknown")
 
-    if not scrim_active:
-        await message.channel.send("No scrim session active. Use /scrim start first.")
-        return
+    async with replay_lock:
 
-    if True:
         for pid, p in players.items():
             r = results.get(pid, {})
             if r.get("shots", 0) == 0:
@@ -516,26 +511,25 @@ async def handle_replay(data, message):
                 scrim_data[pid] = fresh_entry()
 
             entry = scrim_data[pid]
-            entry["nickname"]        = p.get("nickname", "")
-            entry["clan_tag"]        = p.get("clan_tag")
-            entry["games"]          += 1
-            entry["damage"]         += r.get("damage_dealt", 0)
-            entry["kills"]          += r.get("kills", 0)
-            entry["shots"]          += r.get("shots", 0)
-            entry["hits"]           += r.get("hits", 0)
-            entry["penetrations"]   += r.get("penetrations", 0)
-            entry["blocked"]        += r.get("damage_blocked", 0)
-            entry["damage_received"]+= r.get("damage_received", 0)
-            entry["capture_points"] += r.get("capture_points", 0)
-            entry["assisted_damage"]+= r.get("damage_assisted", 0)
-            entry["survived"]       += r.get("survived", 0)
-            entry["last_map"]        = map_name
-            entry["replay_team"]     = r.get("team", p.get("team", 0))
+            entry["nickname"]         = p.get("nickname", "")
+            entry["clan_tag"]         = p.get("clan_tag")
+            entry["games"]           += 1
+            entry["damage"]          += r.get("damage_dealt", 0)
+            entry["kills"]           += r.get("kills", 0)
+            entry["shots"]           += r.get("shots", 0)
+            entry["hits"]            += r.get("hits", 0)
+            entry["penetrations"]    += r.get("penetrations", 0)
+            entry["blocked"]         += r.get("damage_blocked", 0)
+            entry["damage_received"] += r.get("damage_received", 0)
+            entry["capture_points"]  += r.get("capture_points", 0)
+            entry["assisted_damage"] += r.get("damage_assisted", 0)
+            entry["survived"]        += r.get("survived", 0)
+            entry["last_map"]         = map_name
+            entry["replay_team"]      = r.get("team", p.get("team", 0))
 
             veh_desc = r.get("vehicle_desc", 0)
             if veh_desc:
-                tank_name = get_vehicle_name(veh_desc)
-                entry["tank_counts"][tank_name] += 1
+                entry["tank_counts"][get_vehicle_name(veh_desc)] += 1
 
             if r.get("team") == winner:
                 if r.get("team") == 1:
@@ -543,35 +537,9 @@ async def handle_replay(data, message):
                 else:
                     entry["team2_wins"] += 1
 
-        # Send ONE message per replay, outside the player loop
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
-        await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
 
-    else:
-        lines = []
-        lines.append(f"Map: {map_name.title()} | Mode: {room_type} | Duration: {int(meta['battleDuration'])}s")
-        lines.append("")
-        team1 = [(pid, p) for pid, p in players.items() if p["team"] == 1]
-        team2 = [(pid, p) for pid, p in players.items() if p["team"] == 2]
-        lines.append(f"Team 1{' WINNER' if winner == 1 else ''}")
-        lines.append("```")
-        for pid, p in team1:
-            r = results.get(pid, {})
-            if r.get("shots", 0) == 0:
-                continue
-            lines.append(format_player_line(p, r))
-            lines.append("")
-        lines.append("```")
-        lines.append(f"Team 2{' WINNER' if winner == 2 else ''}")
-        lines.append("```")
-        for pid, p in team2:
-            r = results.get(pid, {})
-            if r.get("shots", 0) == 0:
-                continue
-            lines.append(format_player_line(p, r))
-            lines.append("")
-        lines.append("```")
-        await message.channel.send("\n".join(lines))
+    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
 
 
 @client.event
@@ -579,8 +547,16 @@ async def on_message(message):
     if message.author == client.user:
         return
 
+    # Deduplicate — ignore if we've already processed this message
+    if message.id in processed_message_ids:
+        return
+    processed_message_ids.add(message.id)
+
     for attachment in message.attachments:
         if attachment.filename.endswith(".wotbreplay"):
+            if not scrim_active:
+                await message.channel.send("No scrim session active. Use /scrim start first.")
+                continue
             data = await attachment.read()
             try:
                 await handle_replay(data, message)
@@ -588,6 +564,9 @@ async def on_message(message):
                 await message.channel.send(f"Failed to parse replay: {e}")
 
         elif attachment.filename.endswith(".zip"):
+            if not scrim_active:
+                await message.channel.send("No scrim session active. Use /scrim start first.")
+                continue
             raw = await attachment.read()
             try:
                 with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
