@@ -2,3 +2,5 @@ discord.py
 requests
 matplotlib
 pillow
+flask
+psycopg2-binary
