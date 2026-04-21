@@ -502,7 +502,11 @@ async def handle_replay(data, message):
     room_type = ROOM_TYPES.get(room_type_id, "Unknown")
     map_name = meta.get("mapName", "Unknown")
 
-    if scrim_active:
+    if not scrim_active:
+        await message.channel.send("No scrim session active. Use /scrim start first.")
+        return
+
+    if True:
         for pid, p in players.items():
             r = results.get(pid, {})
             if r.get("shots", 0) == 0:
