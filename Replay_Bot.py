@@ -25,10 +25,10 @@ ROOM_TYPES = {
 }
 
 VEHICLE_NAMES = {
-    4481: "Kranvagn",    20097: "UDES 15/16",  4737: "Emil II",
+    4481: "Kranvagn",    20097: "Felice",  4737: "Emil II",
     8033: "STB-1",       3937: "Type 61",
-    11281: "Leopard 1",  28689: "E 50 M",       11537: "Leopard PTA",
-    12849: "121",        13105: "113",           12593: "WZ-111 5A",
+    11281: "Leopard 1",  28689: "RHM",       11537: "Leopard PTA",
+    12849: "116 F3",        13105: "113",           12593: "WZ-111 5A",
     257: "Object 140",   513: "Object 430U",     769: "IS-7",
     1025: "T-62A",       1281: "Object 907",     4353: "Object 277",
     2049: "M48 Patton",  2305: "T110E5",         2561: "T110E4",
