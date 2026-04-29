@@ -76,10 +76,17 @@ def _fetch_tankopedia_sync():
     except Exception as e:
         print(f"Tankopedia fetch failed: {e} — using hardcoded fallback")
 
-scrim_active = False
-scrim_data = {}
-processed_message_ids = set()  # deduplicate Discord message events
-replay_lock = None  # initialized in on_ready
+scrim_sessions = {}  # guild_id -> {active, data, processed_ids, lock}
+
+def get_session(guild_id):
+    if guild_id not in scrim_sessions:
+        scrim_sessions[guild_id] = {
+            "active": False,
+            "data": {},
+            "processed_ids": set(),
+            "lock": asyncio.Lock(),
+        }
+    return scrim_sessions[guild_id]
 
 def fresh_entry():
     return {
@@ -369,8 +376,6 @@ def generate_scrim_image(results_list, total_games):
 
 @client.event
 async def on_ready():
-    global replay_lock
-    replay_lock = asyncio.Lock()
     await tree.sync()
     await asyncio.to_thread(_fetch_tankopedia_sync)
     print(f"Logged in as {client.user}")
@@ -411,24 +416,25 @@ async def stats(interaction: discord.Interaction, name: str):
 
 @tree.command(name="scrim", description="Start or end a scrim session")
 async def scrim(interaction: discord.Interaction, action: str):
-    global scrim_active, scrim_data
     await interaction.response.defer()
+    session = get_session(interaction.guild_id)
 
     if action.lower() == "start":
-        scrim_active = True
-        scrim_data = {}
-        processed_message_ids.clear()
+        session["active"] = True
+        session["data"] = {}
+        session["processed_ids"].clear()
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
     elif action.lower() == "end":
-        if not scrim_active:
+        if not session["active"]:
             await interaction.followup.send("No scrim session is active. Use /scrim start first.")
             return
-        if not scrim_data:
+        if not session["data"]:
             await interaction.followup.send("No replays were uploaded during this session.")
             return
 
-        scrim_active = False
+        session["active"] = False
+        scrim_data = session["data"]
 
         results_list = []
         for account_id, p in scrim_data.items():
@@ -496,11 +502,13 @@ async def scrim(interaction: discord.Interaction, action: str):
         await interaction.followup.send("Invalid action. Use /scrim start or /scrim end.")
 
 
-async def handle_replay(data, message):
+async def handle_replay(data, message, guild_id):
     meta, players, results, winner = parse_replay_bytes(data)
     map_name = meta.get("mapName", "Unknown")
+    session = get_session(guild_id)
 
-    async with replay_lock:
+    async with session["lock"]:
+        scrim_data = session["data"]
 
         for pid, p in players.items():
             r = results.get(pid, {})
@@ -546,25 +554,29 @@ async def handle_replay(data, message):
 async def on_message(message):
     if message.author == client.user:
         return
-
-    # Deduplicate — ignore if we've already processed this message
-    if message.id in processed_message_ids:
+    if not message.guild:
         return
-    processed_message_ids.add(message.id)
+
+    guild_id = message.guild.id
+    session = get_session(guild_id)
+
+    if message.id in session["processed_ids"]:
+        return
+    session["processed_ids"].add(message.id)
 
     for attachment in message.attachments:
         if attachment.filename.endswith(".wotbreplay"):
-            if not scrim_active:
+            if not session["active"]:
                 await message.channel.send("No scrim session active. Use /scrim start first.")
                 continue
             data = await attachment.read()
             try:
-                await handle_replay(data, message)
+                await handle_replay(data, message, guild_id)
             except Exception as e:
                 await message.channel.send(f"Failed to parse replay: {e}")
 
         elif attachment.filename.endswith(".zip"):
-            if not scrim_active:
+            if not session["active"]:
                 await message.channel.send("No scrim session active. Use /scrim start first.")
                 continue
             raw = await attachment.read()
@@ -579,7 +591,7 @@ async def on_message(message):
                     with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
                         replay_data = z.read(name)
                     try:
-                        await handle_replay(replay_data, message)
+                        await handle_replay(replay_data, message, guild_id)
                     except Exception as e:
                         await message.channel.send(f"Failed to parse {name}: {e}")
             except Exception as e:
