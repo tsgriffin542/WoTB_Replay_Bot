@@ -367,7 +367,7 @@ def generate_scrim_image(results_list, total_games):
                     fontsize=9, ha=ha, va="center", zorder=2)
 
         # DMG Share bar
-        bar_color = GREEN if dmg_share >= 25 else YELLOW
+        bar_color = GREEN if dmg_share >= 15 else YELLOW
         bar_max_w = 0.032
         bar_w = bar_max_w * min(dmg_share / 40.0, 1.0)
         bar_x = col_x[5] + 0.002
