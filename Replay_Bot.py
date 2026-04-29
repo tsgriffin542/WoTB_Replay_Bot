@@ -370,7 +370,7 @@ def generate_scrim_image(results_list, total_games):
         bar_color = GREEN if dmg_share >= 15 else YELLOW
         bar_max_w = 0.032
         bar_w = bar_max_w * min(dmg_share / 40.0, 1.0)
-        bar_x = col_x[5] + 0.002
+        bar_x = col_x[5] - 0.015
         bar_h = row_h * 0.45
         bar_y = y - row_h * 0.5 - bar_h * 0.5
         ax.add_patch(plt.Rectangle((bar_x, bar_y), bar_w, bar_h,
