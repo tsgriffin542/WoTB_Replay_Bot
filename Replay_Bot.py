@@ -158,11 +158,11 @@ def parse_player(data):
 
 def parse_player_results_info(data):
     f = parse_message(data)
-    survived_raw = f.get(13, [0])[0]
+    print(f"[DEBUG kills] { {k: v for k, v in f.items() if isinstance(k, int) and k < 50} }")
     return {
         "account_id":       f.get(101, [0])[0],
         "damage_dealt":     f.get(8,   [0])[0],
-        "kills":            f.get(18,  [0])[0],
+        "kills":            f.get(16,  [0])[0],
         "shots":            f.get(4,   [0])[0],
         "hits":             f.get(5,   [0])[0],
         "penetrations":     f.get(7,   [0])[0],
@@ -170,7 +170,7 @@ def parse_player_results_info(data):
         "damage_received":  f.get(11,  [0])[0],
         "capture_points":   f.get(14,  [0])[0],
         "damage_assisted":  f.get(15,  [0])[0],
-        "survived":         1 if survived_raw > 0 else 0,
+        "survived":         1 if 18 in f else 0,
         "vehicle_desc":     f.get(103, [0])[0],
         "team":             f.get(102, [0])[0],
     }
