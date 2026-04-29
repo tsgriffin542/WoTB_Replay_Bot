@@ -348,7 +348,7 @@ def generate_scrim_image(results_list, total_games):
             (str(r["games"]),         TEXT_MUT,      "center"),
             (str(score),              score_color,   "center"),
             (f"{r['avg_dmg']:,}",     TEXT_MUT,      "center"),
-            (f"{dmg_share}%",         TEXT_MUT,      "center"),
+            None,  # DMG Share drawn as bar
             (str(r["total_kills"]),   TEXT_MUT,      "center"),
             (str(r["dmg_ratio"]),     TEXT_MUT,      "center"),
             (f"{r['pen_pct']}%",      TEXT_MUT,      "center"),
@@ -357,11 +357,27 @@ def generate_scrim_image(results_list, total_games):
             (f"{r['avg_blocked']:,}", TEXT_MUT,      "center"),
         ]
 
-        for i, (val, color, ha) in enumerate(values):
+        for i, val_tuple in enumerate(values):
+            if val_tuple is None:
+                continue
+            val, color, ha = val_tuple
             xpos = col_x[i] + (0.006 if ha == "left" else 0)
             ax.text(xpos, y - row_h * 0.48, val,
                     transform=ax.transAxes, color=color,
                     fontsize=9, ha=ha, va="center", zorder=2)
+
+        # DMG Share bar
+        bar_color = GREEN if dmg_share >= 25 else YELLOW
+        bar_max_w = 0.032
+        bar_w = bar_max_w * min(dmg_share / 40.0, 1.0)
+        bar_x = col_x[5] + 0.002
+        bar_h = row_h * 0.45
+        bar_y = y - row_h * 0.5 - bar_h * 0.5
+        ax.add_patch(plt.Rectangle((bar_x, bar_y), bar_w, bar_h,
+                                   transform=ax.transAxes, color=bar_color, zorder=2))
+        ax.text(bar_x + bar_max_w + 0.004, y - row_h * 0.48, f"{dmg_share}%",
+                transform=ax.transAxes, color=bar_color,
+                fontsize=9, ha="left", va="center", zorder=3)
 
         y -= row_h
 
