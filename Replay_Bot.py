@@ -85,6 +85,8 @@ def get_session(guild_id):
             "data": {},
             "processed_ids": set(),
             "lock": asyncio.Lock(),
+            "team1_wins": 0,
+            "team2_wins": 0,
         }
     return scrim_sessions[guild_id]
 
@@ -95,7 +97,6 @@ def fresh_entry():
         "blocked": 0, "damage_received": 0, "capture_points": 0,
         "assisted_damage": 0, "survived": 0, "tank_counts": defaultdict(int),
         "last_map": "Unknown", "replay_team": 0,
-        "team1_wins": 0, "team2_wins": 0,
     }
 
 def read_varint(data, pos):
@@ -253,7 +254,7 @@ def send_in_chunks(text, max_length=1900):
         chunks.append(current)
     return chunks
 
-def generate_scrim_image(results_list, total_games):
+def generate_scrim_image(results_list, total_games, team1_wins=0, team2_wins=0):
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
@@ -265,6 +266,8 @@ def generate_scrim_image(results_list, total_games):
     YELLOW    = "#facc15"
     RED       = "#f87171"
     PURPLE    = "#a78bfa"
+    TEAM1     = "#60a5fa"
+    TEAM2     = "#f87171"
 
     COLS = [
         ("Player",     2.4),
@@ -303,8 +306,19 @@ def generate_scrim_image(results_list, total_games):
     ax.text(0.5, 1 - header_h * 0.35, "Scrim Stats",
             transform=ax.transAxes, color=TEXT_MAIN,
             fontsize=14, fontweight="bold", ha="center", va="center", zorder=2)
-    ax.text(0.5, 1 - header_h * 0.78, f"{total_games} games",
-            transform=ax.transAxes, color=TEXT_MUT,
+
+    if team1_wins > team2_wins:
+        winner_text = "Blue wins"
+        winner_color = TEAM1
+    elif team2_wins > team1_wins:
+        winner_text = "Red wins"
+        winner_color = TEAM2
+    else:
+        winner_text = "Tied"
+        winner_color = TEXT_MUT
+    score_str = f"{team1_wins} - {team2_wins}  |  {winner_text}  |  {total_games} games"
+    ax.text(0.5, 1 - header_h * 0.78, score_str,
+            transform=ax.transAxes, color=winner_color,
             fontsize=9, ha="center", va="center", zorder=2)
     ax.text(0.01, 1 - header_h * 0.5,
             "Score:  70+ high   50-69 mid   <50 low",
@@ -342,8 +356,9 @@ def generate_scrim_image(results_list, total_games):
         score_color = GREEN if score >= 70 else (YELLOW if score >= 50 else RED)
         survived_color = GREEN if r["survived_pct"] >= 50 else RED
 
+        name_color = TEAM1 if r.get("replay_team") == 1 else (TEAM2 if r.get("replay_team") == 2 else TEXT_MAIN)
         values = [
-            (r["name"],               TEXT_MAIN,     "left"),
+            (r["name"],               name_color,    "left"),
             (r["main_tank"],          PURPLE,        "center"),
             (str(r["games"]),         TEXT_MUT,      "center"),
             (str(score),              score_color,   "center"),
@@ -440,6 +455,8 @@ async def scrim(interaction: discord.Interaction, action: str):
         session["active"] = True
         session["data"] = {}
         session["processed_ids"].clear()
+        session["team1_wins"] = 0
+        session["team2_wins"] = 0
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
     elif action.lower() == "end":
@@ -496,9 +513,11 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         results_list.sort(key=lambda x: x["score"], reverse=True)
         total_games = max(p["games"] for p in scrim_data.values())
+        team1_wins = session["team1_wins"]
+        team2_wins = session["team2_wins"]
 
         try:
-            img_buf = generate_scrim_image(results_list, total_games)
+            img_buf = generate_scrim_image(results_list, total_games, team1_wins, team2_wins)
             await interaction.followup.send(
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
@@ -558,11 +577,10 @@ async def handle_replay(data, message, guild_id):
             if veh_desc:
                 entry["tank_counts"][get_vehicle_name(veh_desc)] += 1
 
-            if r.get("team") == winner:
-                if r.get("team") == 1:
-                    entry["team1_wins"] += 1
-                else:
-                    entry["team2_wins"] += 1
+        if winner == 1:
+            session["team1_wins"] += 1
+        elif winner == 2:
+            session["team2_wins"] += 1
 
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
 
