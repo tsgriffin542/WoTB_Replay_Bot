@@ -554,7 +554,9 @@ async def handle_replay(data, message, guild_id):
             entry["assisted_damage"] += r.get("damage_assisted", 0)
             entry["survived"]        += r.get("survived", 0)
             entry["last_map"]         = map_name
-            entry["replay_team"]      = r.get("team", p.get("team", 0))
+            new_team = r.get("team") or p.get("team", 0)
+            if new_team:
+                entry["replay_team"] = new_team
 
             veh_desc = r.get("vehicle_desc", 0)
             if veh_desc:
