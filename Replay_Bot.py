@@ -584,7 +584,7 @@ async def handle_replay(data, message, guild_id):
 
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
 
-    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
+    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. (debug: winner={winner}) Use /scrim end when done.")
 
 
 @client.event
