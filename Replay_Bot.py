@@ -209,6 +209,7 @@ def parse_replay_bytes(data):
             results[r["account_id"]] = r
 
     winner = fields.get(3, [0])[0]
+    print("TOP-LEVEL FIELDS:", {k: v for k, v in fields.items() if k not in (201, 301)})
     return meta, players, results, winner
 
 def calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills, dmg_ratio):
