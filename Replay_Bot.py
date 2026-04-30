@@ -543,7 +543,8 @@ async def scrim(interaction: discord.Interaction, action: str):
 async def handle_replay(data, message, guild_id):
     meta, players, results, winner, debug_fields = parse_replay_bytes(data)
     map_name = meta.get("mapName", "Unknown")
-    await message.channel.send(f"debug fields: {debug_fields}")
+    small = {k: v for k, v in debug_fields.items() if all(isinstance(x, int) for x in v)}
+    await message.channel.send(f"debug fields (int only): {small}")
     session = get_session(guild_id)
 
     async with session["lock"]:
