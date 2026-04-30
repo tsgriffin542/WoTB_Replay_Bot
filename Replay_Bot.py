@@ -209,8 +209,7 @@ def parse_replay_bytes(data):
             results[r["account_id"]] = r
 
     winner = fields.get(3, [0])[0]
-    print("TOP-LEVEL FIELDS:", {k: v for k, v in fields.items() if k not in (201, 301)})
-    return meta, players, results, winner
+    return meta, players, results, winner, {k: v for k, v in fields.items() if k not in (201, 301)}
 
 def calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills, dmg_ratio):
     raw = (
@@ -542,8 +541,9 @@ async def scrim(interaction: discord.Interaction, action: str):
 
 
 async def handle_replay(data, message, guild_id):
-    meta, players, results, winner = parse_replay_bytes(data)
+    meta, players, results, winner, debug_fields = parse_replay_bytes(data)
     map_name = meta.get("mapName", "Unknown")
+    await message.channel.send(f"debug fields: {debug_fields}")
     session = get_session(guild_id)
 
     async with session["lock"]:
