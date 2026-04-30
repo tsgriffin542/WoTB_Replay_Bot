@@ -85,8 +85,6 @@ def get_session(guild_id):
             "data": {},
             "processed_ids": set(),
             "lock": asyncio.Lock(),
-            "team1_wins": 0,
-            "team2_wins": 0,
         }
     return scrim_sessions[guild_id]
 
@@ -208,8 +206,7 @@ def parse_replay_bytes(data):
         if r.get("account_id"):
             results[r["account_id"]] = r
 
-    winner = fields.get(3, [0])[0]
-    return meta, players, results, winner, {k: v for k, v in fields.items() if k not in (201, 301)}
+    return meta, players, results
 
 def calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills, dmg_ratio):
     raw = (
@@ -254,7 +251,7 @@ def send_in_chunks(text, max_length=1900):
         chunks.append(current)
     return chunks
 
-def generate_scrim_image(results_list, total_games, team1_wins=0, team2_wins=0):
+def generate_scrim_image(results_list, total_games):
     BG        = "#0f0f1a"
     HEADER_BG = "#16213e"
     ROW_ODD   = "#0f0f1a"
@@ -307,18 +304,8 @@ def generate_scrim_image(results_list, total_games, team1_wins=0, team2_wins=0):
             transform=ax.transAxes, color=TEXT_MAIN,
             fontsize=14, fontweight="bold", ha="center", va="center", zorder=2)
 
-    if team1_wins > team2_wins:
-        winner_text = "Blue wins"
-        winner_color = TEAM1
-    elif team2_wins > team1_wins:
-        winner_text = "Red wins"
-        winner_color = TEAM2
-    else:
-        winner_text = "Tied"
-        winner_color = TEXT_MUT
-    score_str = f"{team1_wins} - {team2_wins}  |  {winner_text}  |  {total_games} games"
-    ax.text(0.5, 1 - header_h * 0.78, score_str,
-            transform=ax.transAxes, color=winner_color,
+    ax.text(0.5, 1 - header_h * 0.78, f"{total_games} games",
+            transform=ax.transAxes, color=TEXT_MUT,
             fontsize=9, ha="center", va="center", zorder=2)
     ax.text(0.01, 1 - header_h * 0.5,
             "Score:  70+ high   50-69 mid   <50 low",
@@ -455,8 +442,6 @@ async def scrim(interaction: discord.Interaction, action: str):
         session["active"] = True
         session["data"] = {}
         session["processed_ids"].clear()
-        session["team1_wins"] = 0
-        session["team2_wins"] = 0
         await interaction.followup.send("Scrim session started! Upload replays whenever you are ready.")
 
     elif action.lower() == "end":
@@ -513,11 +498,9 @@ async def scrim(interaction: discord.Interaction, action: str):
 
         results_list.sort(key=lambda x: x["score"], reverse=True)
         total_games = max(p["games"] for p in scrim_data.values())
-        team1_wins = session["team1_wins"]
-        team2_wins = session["team2_wins"]
 
         try:
-            img_buf = generate_scrim_image(results_list, total_games, team1_wins, team2_wins)
+            img_buf = generate_scrim_image(results_list, total_games)
             await interaction.followup.send(
                 file=discord.File(fp=img_buf, filename="scrim_results.png")
             )
@@ -541,10 +524,8 @@ async def scrim(interaction: discord.Interaction, action: str):
 
 
 async def handle_replay(data, message, guild_id):
-    meta, players, results, winner, debug_fields = parse_replay_bytes(data)
+    meta, players, results = parse_replay_bytes(data)
     map_name = meta.get("mapName", "Unknown")
-    small = {k: v for k, v in debug_fields.items() if all(isinstance(x, int) for x in v)}
-    await message.channel.send(f"debug fields (int only): {small}")
     session = get_session(guild_id)
 
     async with session["lock"]:
@@ -579,14 +560,9 @@ async def handle_replay(data, message, guild_id):
             if veh_desc:
                 entry["tank_counts"][get_vehicle_name(veh_desc)] += 1
 
-        if winner == 1:
-            session["team1_wins"] += 1
-        elif winner == 2:
-            session["team2_wins"] += 1
-
         game_count = max(e["games"] for e in scrim_data.values()) if scrim_data else 0
 
-    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. (debug: winner={winner}) Use /scrim end when done.")
+    await message.channel.send(f"Replay added. {game_count} game(s) recorded so far. Use /scrim end when done.")
 
 
 @client.event
