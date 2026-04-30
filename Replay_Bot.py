@@ -616,4 +616,38 @@ async def on_message(message):
             except Exception as e:
                 await message.channel.send(f"Failed to open zip: {e}")
 
+    for snapshot in getattr(message, 'message_snapshots', []):
+        for attachment in getattr(snapshot, 'attachments', []):
+            if attachment.filename.endswith(".wotbreplay"):
+                if not session["active"]:
+                    await message.channel.send("No scrim session active. Use /scrim start first.")
+                    continue
+                data = await attachment.read()
+                try:
+                    await handle_replay(data, message, guild_id)
+                except Exception as e:
+                    await message.channel.send(f"Failed to parse forwarded replay: {e}")
+
+            elif attachment.filename.endswith(".zip"):
+                if not session["active"]:
+                    await message.channel.send("No scrim session active. Use /scrim start first.")
+                    continue
+                raw = await attachment.read()
+                try:
+                    with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
+                        replays = [n for n in z.namelist() if n.endswith(".wotbreplay")]
+                    if not replays:
+                        await message.channel.send("No .wotbreplay files found in that zip.")
+                        continue
+                    await message.channel.send(f"Found {len(replays)} replay(s) in zip, processing...")
+                    for name in replays:
+                        with zipfile.ZipFile(io.BytesIO(raw), "r") as z:
+                            replay_data = z.read(name)
+                        try:
+                            await handle_replay(replay_data, message, guild_id)
+                        except Exception as e:
+                            await message.channel.send(f"Failed to parse {name}: {e}")
+                except Exception as e:
+                    await message.channel.send(f"Failed to open zip: {e}")
+
 client.run("MTQ5MTkyOTQ4NDA5NjcwMDQ4Ng.GekR-4.nZM6eb-bT7PxgFkx9JfTGeFILnud_0ih6S9qTQ")
