@@ -278,6 +278,7 @@ def generate_scrim_image(results_list, total_games):
         ("Pen%",       0.7),
         ("Survived",   0.9),
         ("Shots/G",    0.8),
+        ("DMG/Shot",   0.8),
         ("Avg Blocked", 1.0),
     ]
 
@@ -352,8 +353,9 @@ def generate_scrim_image(results_list, total_games):
             (str(r["dmg_ratio"]),     TEXT_MUT,      "center"),
             (f"{r['pen_pct']}%",      TEXT_MUT,      "center"),
             (f"{r['survived_pct']}%", survived_color,"center"),
-            (str(r["shots_g"]),       TEXT_MUT,      "center"),
-            (f"{r['avg_blocked']:,}", TEXT_MUT,      "center"),
+            (str(r["shots_g"]),        TEXT_MUT,      "center"),
+            (f"{r['dmg_per_shot']:,}", TEXT_MUT,      "center"),
+            (f"{r['avg_blocked']:,}",  TEXT_MUT,      "center"),
         ]
 
         for i, val_tuple in enumerate(values):
@@ -465,6 +467,7 @@ async def scrim(interaction: discord.Interaction, action: str):
             avg_assist   = round(p["assisted_damage"] / games)
             survived_pct = round(p["survived"] / games * 100)
             shots_g      = round(p["shots"] / games, 1)
+            dmg_per_shot = round(p["damage"] / p["shots"]) if p["shots"] > 0 else 0
             pen_pct      = round(p["penetrations"] / shots * 100) if shots > 0 else 0
             dmg_ratio    = round(p["damage"] / p["damage_received"], 2) if p["damage_received"] > 0 else "inf"
             score        = calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills,
@@ -487,6 +490,7 @@ async def scrim(interaction: discord.Interaction, action: str):
                 "avg_blocked":  avg_blocked,
                 "survived_pct": survived_pct,
                 "shots_g":      shots_g,
+                "dmg_per_shot": dmg_per_shot,
                 "main_tank":    main_tank,
             })
 
