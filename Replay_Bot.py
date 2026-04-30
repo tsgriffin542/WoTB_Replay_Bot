@@ -467,7 +467,7 @@ async def scrim(interaction: discord.Interaction, action: str):
             avg_assist   = round(p["assisted_damage"] / games)
             survived_pct = round(p["survived"] / games * 100)
             shots_g      = round(p["shots"] / games, 1)
-            dmg_per_shot = round(p["damage"] / p["shots"]) if p["shots"] > 0 else 0
+            dmg_per_shot = round(p["damage"] / p["penetrations"]) if p["penetrations"] > 0 else 0
             pen_pct      = round(p["penetrations"] / shots * 100) if shots > 0 else 0
             dmg_ratio    = round(p["damage"] / p["damage_received"], 2) if p["damage_received"] > 0 else "inf"
             score        = calc_score(avg_dmg, pen_pct, avg_blocked, avg_kills,
