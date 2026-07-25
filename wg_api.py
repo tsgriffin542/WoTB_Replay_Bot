@@ -1,6 +1,7 @@
-﻿import requests
+﻿import os
+import requests
 
-API_KEY = "2a90ced375eda9ceda27d4a6c6883e9b"
+API_KEY = os.getenv("WG_API_KEY")
 
 def get_player(name):
     url = "https://api.wotblitz.com/wotb/account/list/"
