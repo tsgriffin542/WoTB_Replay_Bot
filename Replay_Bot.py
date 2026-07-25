@@ -1,4 +1,6 @@
 # encoding: utf-8
+import os
+from dotenv import load_dotenv
 import discord
 from discord import app_commands
 import wg_api
@@ -648,4 +650,5 @@ async def on_message(message):
                 except Exception as e:
                     await message.channel.send(f"Failed to open zip: {e}")
 
-client.run("MTQ5MTkyOTQ4NDA5NjcwMDQ4Ng.GekR-4.nZM6eb-bT7PxgFkx9JfTGeFILnud_0ih6S9qTQ")
+load_dotenv()
+client.run(os.getenv("DISCORD_TOKEN"))
